@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Verse",
+  "version": "0.2.0",
+  "description": "Shows YouTube Music synced lyrics (word-level) in the Verse macOS menu-bar app.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "lyra-ytm@local",
+      "strict_min_version": "121.0"
+    }
+  },
+  "permissions": [
+    "nativeMessaging",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://music.youtube.com/*",
+    "https://lrclib.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://music.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxF533mMqkzzVjYQbL+xxzr/oVo2VKDBGStCpQL4TLRQq3wk4WW315nsw/mkgsAACBiGJnn/62T3OGvsvVBtZymWg9wCfTd7Z1bPBPIQ8Jy7aqEKGpOpEibDTwrYanidoO7AbMdZ+DMmIzYaSTcEheJqL5JXYYYOsGZwrpCSCjw4Vz6U/S/Kayr3jLta8GqAyYtxHFdURKffqBuesnP010UE0pJ+tFhSixUwNEFx+ZQswjIQ5vwZqV1Z1ZMTmZ9sMYQZtynizhrlIG4Ut0SzmX6tlGDMKRuhX9udsfTCCxhRAnzySRElxymtt1/mJbcIyDpaE8KnZDdxXJJigzanfNQIDAQAB"
+}

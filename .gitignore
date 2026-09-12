@@ -1,0 +1,9 @@
+# Chrome extension signing private key — NEVER commit
+.chrome-key.pem
+
+# Swift build output
+menubar/.build/
+.build/
+
+# macOS
+.DS_Store
