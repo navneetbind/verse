@@ -1,6 +1,6 @@
 import AppKit
 
-// LYRA menu-bar app: shows the current YouTube Music lyric line pushed from the
+// Verse menu-bar app: shows the current YouTube Music lyric line pushed from the
 // browser extension via native messaging. Bolds the active word; keeps the
 // active word visible on long lines by windowing around it.
 

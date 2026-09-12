@@ -1,5 +1,5 @@
 #!/bin/bash
-# LYRA for YT Music — one-command installer (macOS).
+# Verse for YT Music — one-command installer (macOS).
 # Builds the menu-bar app, gives the extension a stable Chrome ID, and installs
 # the native-messaging host manifest for every browser you have.
 set -euo pipefail
@@ -8,12 +8,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXT="$ROOT/extension"
 MENUBAR="$ROOT/menubar"
 KEY_PEM="$ROOT/.chrome-key.pem" # private key -> deterministic Chrome extension id
-FF_ID="lyra-ytm@local"
-HOST_NAME="lyra_ytm"
+FF_ID="verse@local"
+HOST_NAME="verse"
 
 echo "==> Building menu-bar app (release)…"
 ( cd "$MENUBAR" && swift build -c release )
-BIN="$(cd "$MENUBAR" && python3 -c "import os;print(os.path.realpath('.build/release/lyra-menubar'))")"
+BIN="$(cd "$MENUBAR" && python3 -c "import os;print(os.path.realpath('.build/release/verse'))")"
 echo "    binary: $BIN"
 
 echo "==> Preparing Chrome extension key…"
@@ -42,7 +42,7 @@ ff_manifest() {
   cat <<EOF
 {
   "name": "$HOST_NAME",
-  "description": "LYRA menu-bar lyrics host",
+  "description": "Verse menu-bar lyrics host",
   "path": "$BIN",
   "type": "stdio",
   "allowed_extensions": ["$FF_ID"]
@@ -53,7 +53,7 @@ chrome_manifest() {
   cat <<EOF
 {
   "name": "$HOST_NAME",
-  "description": "LYRA menu-bar lyrics host",
+  "description": "Verse menu-bar lyrics host",
   "path": "$BIN",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://$CHROME_ID/"]

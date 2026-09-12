@@ -5,7 +5,7 @@
   "description": "Shows YouTube Music synced lyrics (word-level) in the Verse macOS menu-bar app.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "lyra-ytm@local",
+      "id": "verse@local",
       "strict_min_version": "121.0"
     }
   },
@@ -19,7 +19,9 @@
   ],
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {

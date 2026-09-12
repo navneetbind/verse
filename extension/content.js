@@ -137,8 +137,8 @@ setInterval(checkTrack, 1000);
 // ---- playback position ----
 function attachVideo() {
   const video = document.querySelector("video");
-  if (!video || video._lyraAttached) return;
-  video._lyraAttached = true;
+  if (!video || video._verseAttached) return;
+  video._verseAttached = true;
 
   video.addEventListener("timeupdate", () => {
     const now = performance.now();

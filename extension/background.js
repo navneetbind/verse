@@ -3,7 +3,7 @@
 
 const api = globalThis.browser || globalThis.chrome;
 
-const NATIVE_HOST = "lyra_ytm";
+const NATIVE_HOST = "verse";
 const LRCLIB = "https://lrclib.net";
 
 // Lyric timing offset (seconds). LRCLIB community timestamps often sit a bit
@@ -124,7 +124,7 @@ async function fetchLyrics(title, artist, duration) {
     const url =
       `${LRCLIB}/api/get?` +
       q({ artist_name: artist, track_name: cleanTitle(title), duration: Math.round(duration) });
-    const r = await fetch(url, { headers: { "User-Agent": "lyra-ytm v0.2" } });
+    const r = await fetch(url, { headers: { "User-Agent": "verse v0.2" } });
     if (r.ok) {
       const d = await r.json();
       if (d && d.syncedLyrics) return d.syncedLyrics;
@@ -132,7 +132,7 @@ async function fetchLyrics(title, artist, duration) {
   } catch (_) {}
   try {
     const url = `${LRCLIB}/api/search?` + q({ track_name: cleanTitle(title), artist_name: artist });
-    const r = await fetch(url, { headers: { "User-Agent": "lyra-ytm v0.2" } });
+    const r = await fetch(url, { headers: { "User-Agent": "verse v0.2" } });
     if (r.ok) {
       const arr = await r.json();
       const synced = Array.isArray(arr) ? arr.filter((x) => x.syncedLyrics) : [];

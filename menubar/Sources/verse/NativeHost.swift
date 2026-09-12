@@ -9,7 +9,7 @@ final class NativeHost {
     var onEOF: (() -> Void)?
 
     private let fd: Int32 = 0 // stdin
-    private let outQueue = DispatchQueue(label: "lyra.out")
+    private let outQueue = DispatchQueue(label: "verse.out")
 
     func start() {
         Thread.detachNewThread { [weak self] in self?.loop() }

@@ -1,4 +1,4 @@
-# LYRA for YT Music
+# Verse for YT Music
 
 Real-time synced lyrics for **YouTube Music** shown in the **macOS menu bar** —
 word-by-word, in **Chrome / Brave / Edge / Chromium / Firefox**.
@@ -25,7 +25,7 @@ Lyrics can keep running on-page alongside this.
 ## Install (one command)
 
 ```bash
-~/Downloads/lyra-ytm/install.sh
+~/Downloads/verse/install.sh
 ```
 
 It builds the app, gives the extension a stable Chrome ID, and installs the
@@ -77,14 +77,14 @@ browser disconnects).
 
 ## Files
 ```
-lyra-ytm/
+verse/
 ├─ install.sh          build + install host manifests + Chrome key/id
 ├─ extension/          MV3 (Chrome + Firefox)
 │  ├─ manifest.json    (install.sh injects a "key" for a stable Chrome id)
 │  ├─ content.js
 │  └─ background.js
 ├─ menubar/            Swift SPM app
-│  └─ Sources/lyra-menubar/{main.swift, NativeHost.swift}
+│  └─ Sources/verse/{main.swift, NativeHost.swift}
 └─ .chrome-key.pem     generated private key (keep; do not commit)
 ```
 
