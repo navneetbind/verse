@@ -4,7 +4,13 @@ import AppKit
 // browser extension via native messaging. Bolds the active word; keeps the
 // active word visible on long lines by windowing around it.
 
-let MAX_CHARS = 60 // cap so one very long line can't make the status item huge
+let SCROLL_SPEED: CGFloat = 28 // points per second when there is no word timing
+let MAX_STEP: CGFloat = 5 // points per frame ceiling while catching up to the sung word
+let LEAD: CGFloat = 0.35 // keep the sung word this far in from the left edge
+let SCROLL_GAP: CGFloat = 60 // blank run between the end of the line and its repeat
+let BAR_RESERVE: CGFloat = 24 // safety gap so the line never runs under the notch
+let MAX_WIDTH: CGFloat = 560 // hard ceiling on the status item
+let FALLBACK_ROOM: CGFloat = 260 // used until the menu bar reports a usable frame
 
 struct Payload: Decodable {
     let type: String
@@ -16,6 +22,7 @@ struct Payload: Decodable {
     let art: String?
     let t: Double?
     let dur: Double?
+    let src: String?
 }
 
 struct Theme {
@@ -38,6 +45,10 @@ final class AppController: NSObject, NSApplicationDelegate {
     }()
     private var lineText = "♪ Verse"
     private var activeWord = -1
+    private var scrollTimer: Timer?
+    private var pinnedWidth: CGFloat = -1
+    private var lastRoom: CGFloat = FALLBACK_ROOM
+    private var rightAnchor: CGFloat?
     private var paused = false
     private var songTitle = ""
     private var songArtist = ""
@@ -59,6 +70,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     ]
     private var theme: Theme { themes[min(themeIndex, themes.count - 1)] }
 
+    private var lyricView: LyricView!
     private var nowPlaying: NowPlayingView!
     private var popover: NSPopover!
     private var settingsMenu: NSMenu!
@@ -73,18 +85,33 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var fontSizeIndex = 1
     private var fontSize: CGFloat { sizes[min(fontSizeIndex, sizes.count - 1)].1 }
     private var baseFont: NSFont { .systemFont(ofSize: fontSize, weight: .regular) }
-    private var activeFont: NSFont { .systemFont(ofSize: fontSize, weight: .heavy) }
+    private var activeFont: NSFont { .systemFont(ofSize: fontSize, weight: .semibold) }
     private var sizeItems: [NSMenuItem] = []
+
+    private let widths: [(String, CGFloat)] = [
+        ("Narrow", 240), ("Medium", 320), ("Wide", 400), ("Extra wide", 480),
+    ]
+    private var widthIndex = 1
+    private var lyricWidth: CGFloat { widths[min(widthIndex, widths.count - 1)].1 }
+    private var widthItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if defaults.object(forKey: "wordMode") != nil { wordMode = defaults.bool(forKey: "wordMode") }
         if defaults.object(forKey: "themeIndex") != nil { themeIndex = defaults.integer(forKey: "themeIndex") }
         if defaults.object(forKey: "fontSizeIndex") != nil { fontSizeIndex = defaults.integer(forKey: "fontSizeIndex") }
         if defaults.object(forKey: "sourceIndex") != nil { sourceIndex = defaults.integer(forKey: "sourceIndex") }
+        if defaults.object(forKey: "widthIndex") != nil { widthIndex = defaults.integer(forKey: "widthIndex") }
+        if defaults.object(forKey: "rightAnchor") != nil { rightAnchor = CGFloat(defaults.double(forKey: "rightAnchor")) }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
+        if let b = statusItem.button {
+            let v = LyricView(frame: b.bounds)
+            v.autoresizingMask = [.width, .height]
+            b.addSubview(v)
+            lyricView = v
+        }
 
         // Now Playing card: art + title + artist + seek + transport
         nowPlaying = NowPlayingView()
@@ -164,6 +191,19 @@ final class AppController: NSObject, NSApplicationDelegate {
         sizeParent.submenu = sizeMenu
         menu.addItem(sizeParent)
 
+        let widthParent = NSMenuItem(title: "Lyric width", action: nil, keyEquivalent: "")
+        let widthMenu = NSMenu()
+        for (i, w) in widths.enumerated() {
+            let item = NSMenuItem(title: w.0, action: #selector(pickWidth(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = i
+            item.state = i == widthIndex ? .on : .off
+            widthMenu.addItem(item)
+            widthItems.append(item)
+        }
+        widthParent.submenu = widthMenu
+        menu.addItem(widthParent)
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
@@ -181,12 +221,27 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func handle(_ str: String) {
         guard let data = str.data(using: .utf8),
-              let p = try? JSONDecoder().decode(Payload.self, from: data) else { return }
+              let p = try? JSONDecoder().decode(Payload.self, from: data) else {
+            debugLog("UNDECODABLE \(str.prefix(200))")
+            return
+        }
+        if p.type == "pos" {
+            let now = Date().timeIntervalSince1970
+            if now - lastPosLog > 5 {
+                lastPosLog = now
+                debugLog("RX pos t=\(Int(p.t ?? -1)) paused=\(p.paused.map { "\($0)" } ?? "nil")")
+            }
+        } else if p.type != "diag" {
+            debugLog("RX \(p.type) src=\(p.src ?? "-") active=\(p.active ?? -9) \((p.text ?? p.title ?? "").prefix(60))")
+        }
         switch p.type {
         case "line":
-            lineText = (p.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let newText = (p.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if newText != lineText { lyricView?.offset = 0 }
+            lineText = newText
             if lineText.isEmpty { lineText = idle }
             activeWord = p.active ?? -1
+            lineSrc = p.src ?? "?"
         case "pos":
             paused = p.paused ?? paused
             nowPlaying.setPosition(t: p.t ?? 0, dur: p.dur ?? 0, paused: paused)
@@ -197,6 +252,9 @@ final class AppController: NSObject, NSApplicationDelegate {
             songTitle = p.title ?? ""
             songArtist = p.artist ?? ""
             nowPlaying.setTrack(title: songTitle, artist: songArtist, art: p.art ?? "")
+        case "diag":
+            debugLog("DIAG \(p.text ?? "")")
+            return
         case "clear":
             lineText = idle
             activeWord = -1
@@ -206,78 +264,185 @@ final class AppController: NSObject, NSApplicationDelegate {
         render()
     }
 
-    // Build an attributed line: whole line in regular, the active word in bold.
-    // If the line is longer than MAX_CHARS, window around the active word and add
-    // ellipses so the sung word stays on screen.
+    // Put the lyric in the status item: static when it fits, otherwise a
+    // steady right-to-left ticker so every word comes past.
     private func render() {
         statusItem.button?.image = nil // text modes carry no icon
 
         // idle (nothing playing yet) → show the music-note icon
         if !paused && (lineText.isEmpty || lineText == idle) {
-            statusItem.button?.attributedTitle = NSAttributedString(string: "")
+            stopScrolling()
+            lyricView.isHidden = true
+            lyricView.text = NSAttributedString()
+            setWidth(nil)
             statusItem.button?.image = noteImage
             return
         }
+
+        lyricView.isHidden = false
+        if let b = statusItem.button, lyricView.frame != b.bounds { lyricView.frame = b.bounds }
+        let room = availableWidth()
 
         // paused → show "Title — Artist"
         if paused {
             var t = songTitle
             if !songArtist.isEmpty { t += t.isEmpty ? songArtist : " — \(songArtist)" }
             if t.isEmpty { t = idle }
-            statusItem.button?.attributedTitle = NSAttributedString(
+            let title = NSAttributedString(
                 string: t, attributes: [.font: baseFont, .foregroundColor: theme.base])
+            stopScrolling()
+            lyricView.offset = 0
+            lyricView.text = title
+            setWidth(room)
             return
         }
 
-        let words = lineText.isEmpty ? [] : lineText.components(separatedBy: " ")
-        let showWord = wordMode ? activeWord : -1
+        let words = lineText.isEmpty ? [idle] : lineText.components(separatedBy: " ")
+        let last = words.count - 1
+        let showWord = wordMode ? min(activeWord, last) : -1
 
-        let full = NSMutableAttributedString()
-        var activeRange: NSRange? = nil
-        for (i, w) in words.enumerated() {
-            let isActive = i == showWord
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: isActive ? activeFont : baseFont,
-                .foregroundColor: isActive ? theme.active : theme.base,
-            ]
-            if isActive { activeRange = NSRange(location: full.length, length: (w as NSString).length) }
-            full.append(NSAttributedString(string: w, attributes: attrs))
-            if i < words.count - 1 {
-                full.append(NSAttributedString(string: " ", attributes: [.font: baseFont]))
-            }
-        }
-        if words.isEmpty {
-            full.append(NSAttributedString(string: idle, attributes: [.font: baseFont]))
+        let display = build(words, from: 0, to: last, active: showWord, uniform: false)
+        // measured all-bold: the widest this line can get as the highlight moves,
+        // so the item keeps one width for the whole line
+        let fullWidth = build(words, from: 0, to: last, active: -1, uniform: true).size().width
+        lyricView.text = display
+
+        setWidth(room) // fixed: the item keeps one width whatever the line is
+        if fullWidth <= room {
+            stopScrolling()
+            lyricView.target = 0
+            lyricView.offset = 0
+        } else if showWord > 0 {
+            // slide only as far as the sung word requires, so it is never
+            // carried off the edge before it has been sung
+            let spaceW = NSAttributedString(
+                string: " ", attributes: [.font: baseFont]).size().width
+            let x = build(words, from: 0, to: showWord - 1, active: -1, uniform: true)
+                .size().width + spaceW
+            lyricView.loop = false
+            lyricView.target = max(0, min(x - room * LEAD, fullWidth - room))
+            startScrolling()
+        } else if showWord == 0 {
+            lyricView.loop = false
+            lyricView.target = 0
+            startScrolling()
+        } else {
+            lyricView.loop = true // no word timing — steady marquee
+            startScrolling()
         }
 
-        var display: NSAttributedString = full
-        if full.length > MAX_CHARS {
-            display = window(full, around: activeRange, max: MAX_CHARS)
+        if debugLogURL != nil && lineText != loggedLine {
+            loggedLine = lineText
+            let f = statusItem.button?.window?.frame ?? .zero
+            debugLog("room=\(Int(room)) anchor=\(Int(rightAnchor ?? -1)) maxX=\(Int(f.maxX)) "
+                + "onScreen=\(statusItem.button?.window?.screen != nil) "
+                + "px=\(Int(fullWidth)) scroll=\(scrollTimer != nil) src=\(lineSrc) | \(display.string)")
         }
-
-        statusItem.button?.attributedTitle = display
     }
 
-    // Crop `s` to ~max characters, keeping `keep` (the active word) visible,
-    // adding "…" on whichever side is truncated.
-    private func window(_ s: NSAttributedString, around keep: NSRange?, max: Int) -> NSAttributedString {
-        let len = s.length
-        let center: Int
-        if let k = keep { center = k.location + k.length / 2 } else { center = 0 }
+    // Lay out the whole line. `uniform` renders every word bold — the widest the
+    // line can get — so the pinned width does not jump as the highlight moves.
+    private func build(_ words: [String], from: Int, to: Int,
+                       active: Int, uniform: Bool) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let hi = min(to, words.count - 1)
+        guard from <= hi else { return out }
+        let gap: [NSAttributedString.Key: Any] = [.font: baseFont, .foregroundColor: theme.base]
+        for i in from...hi {
+            let bold = uniform || i == active
+            out.append(NSAttributedString(string: words[i], attributes: [
+                .font: bold ? activeFont : baseFont,
+                .foregroundColor: (!uniform && i == active) ? theme.active : theme.base,
+            ]))
+            if i < hi { out.append(NSAttributedString(string: " ", attributes: gap)) }
+        }
+        return out
+    }
 
-        var start = center - max / 2
-        if start < 0 { start = 0 }
-        var end = start + max
-        if end > len { end = len; start = Swift.max(0, end - max) }
+    private func setWidth(_ w: CGFloat?) {
+        guard let w, w.isFinite, w < 4000 else {
+            if pinnedWidth != -1 {
+                pinnedWidth = -1
+                statusItem.length = NSStatusItem.variableLength
+            }
+            return
+        }
+        let want = (w + 8).rounded()
+        if abs(want - pinnedWidth) > 1 {
+            pinnedWidth = want
+            statusItem.length = want
+        }
+    }
 
-        let cropped = NSMutableAttributedString(
-            attributedString: s.attributedSubstring(from: NSRange(location: start, length: end - start)))
-        let dots: [NSAttributedString.Key: Any] = [
-            .font: baseFont, .foregroundColor: NSColor.tertiaryLabelColor,
-        ]
-        if end < len { cropped.append(NSAttributedString(string: "…", attributes: dots)) }
-        if start > 0 { cropped.insert(NSAttributedString(string: "…", attributes: dots), at: 0) }
-        return cropped
+    // Diagnostics, off unless ~/.verse-debug exists.
+    private let debugLogURL: URL? = {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        guard FileManager.default.fileExists(
+            atPath: home.appendingPathComponent(".verse-debug").path) else { return nil }
+        return home.appendingPathComponent("verse-debug.log")
+    }()
+    private var loggedLine = ""
+    private var lineSrc = ""
+    private var lastPosLog: TimeInterval = 0
+
+    private func debugLog(_ s: String) {
+        guard let url = debugLogURL else { return }
+        let line = "\(Date().timeIntervalSince1970) \(s)\n"
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(Data(line.utf8))
+            try? h.close()
+        } else {
+            try? line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func startScrolling() {
+        guard scrollTimer == nil else { return }
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.scrollTick() }
+        RunLoop.main.add(t, forMode: .common)
+        scrollTimer = t
+    }
+
+    private func stopScrolling() {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        lyricView?.loop = false
+    }
+
+    private func scrollTick() {
+        guard let v = lyricView else { return }
+        if v.loop {
+            let span = v.textWidth + SCROLL_GAP
+            guard span > 0 else { return }
+            var o = v.offset + SCROLL_SPEED / 30.0
+            if o >= span { o -= span }
+            v.offset = o
+            return
+        }
+        let delta = v.target - v.offset
+        if abs(delta) < 0.3 {
+            if v.offset != v.target { v.offset = v.target }
+        } else {
+            v.offset += max(-MAX_STEP, min(MAX_STEP, delta * 0.12))
+        }
+    }
+
+    private func availableWidth() -> CGFloat {
+        guard let win = statusItem.button?.window,
+              let screen = win.screen ?? NSScreen.main,
+              let right = screen.auxiliaryTopRightArea else { return lastRoom }
+        let notchRight = screen.frame.minX + right.minX
+        let f = win.frame
+        if f.width > 0 && f.maxX > notchRight && f.maxX <= screen.frame.maxX + 1 {
+            if rightAnchor != f.maxX {
+                rightAnchor = f.maxX
+                defaults.set(Double(f.maxX), forKey: "rightAnchor")
+            }
+        }
+        guard let anchor = rightAnchor else { return lastRoom }
+        lastRoom = max(80, min(lyricWidth, anchor - notchRight - BAR_RESERVE))
+        return lastRoom
     }
 
     @objc private func pickLyricsMode(_ sender: NSMenuItem) {
@@ -314,6 +479,13 @@ final class AppController: NSObject, NSApplicationDelegate {
         for item in sourceItems { item.state = item.tag == sourceIndex ? .on : .off }
         defaults.set(sourceIndex, forKey: "sourceIndex")
         host.send(["cmd": "source", "value": sourceIndex])
+    }
+
+    @objc private func pickWidth(_ sender: NSMenuItem) {
+        widthIndex = sender.tag
+        for item in widthItems { item.state = item.tag == widthIndex ? .on : .off }
+        defaults.set(widthIndex, forKey: "widthIndex")
+        render()
     }
 
     @objc private func pickSize(_ sender: NSMenuItem) {

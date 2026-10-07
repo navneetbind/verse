@@ -77,7 +77,8 @@ function send(obj) {
     port = null;
   }
 }
-connectNative();
+// No connect at startup: the app launches only when a YouTube Music page first
+// sends something (send() connects on demand), not on every browser start.
 
 // ---- lyrics ----
 function cleanTitle(s) {
@@ -161,7 +162,7 @@ async function onTrack(title, artist, duration, art) {
 
   // placeholder shown until real lyrics arrive (both BL and LRCLIB modes)
   const titleArtist = title + (artist ? " — " + artist : "");
-  send({ type: "line", text: titleArtist || "♪", active: -1 });
+  send({ type: "line", text: titleArtist || "♪", active: -1, src: "placeholder" });
 
   if (blMode) return; // Better Lyrics provides the lines; skip LRCLIB
 
@@ -171,7 +172,7 @@ async function onTrack(title, artist, duration, art) {
     lines = parseLRC(lrc);
   } else {
     lines = [];
-    send({ type: "line", text: "♪ " + titleArtist, active: -1 });
+    send({ type: "line", text: "♪ " + titleArtist, active: -1, src: "nolyrics" });
   }
 }
 
@@ -188,7 +189,7 @@ function onTime(rawT) {
   if (idx === curIdx) return;
   curIdx = idx;
   const text = idx < 0 ? "♪" : lines[idx].text;
-  send({ type: "line", text, active: -1 });
+  send({ type: "line", text, active: -1, src: "lrc" });
 }
 
 api.runtime.onMessage.addListener((msg) => {
@@ -197,8 +198,11 @@ api.runtime.onMessage.addListener((msg) => {
     case "mode":
       blMode = !!msg.bl;
       break;
+    case "diag": // one-shot DOM report, relayed into the app's debug log
+      send({ type: "diag", text: msg.text || "" });
+      break;
     case "bl": // Better Lyrics already computed the line + active word
-      send({ type: "line", text: msg.text || "♪", active: msg.active ?? -1 });
+      send({ type: "line", text: msg.text || "♪", active: msg.active ?? -1, src: msg.timed ? "bl-word" : "bl-line" });
       break;
     case "track":
       onTrack(msg.title || "", msg.artist || "", msg.duration || 0, msg.art || "");
