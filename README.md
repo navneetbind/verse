@@ -1,94 +1,108 @@
 # Verse for YT Music
 
-Real-time synced lyrics for **YouTube Music** shown in the **macOS menu bar** —
-word-by-word, in **Chrome / Brave / Edge / Chromium / Firefox**.
+Synced **YouTube Music** lyrics in the **macOS menu bar**, word by word, from
+**Firefox, Chrome, Brave, Edge, Vivaldi or Arc**.
 
-A browser extension scrapes the current track + playback position from YouTube
-Music, fetches synced lyrics from [LRCLIB](https://lrclib.net), and pushes the
-current line (with the active word) to a tiny Swift menu-bar app over **native
-messaging**.
+A browser extension reads the current song and lyrics from YouTube Music and
+sends the line being sung to a small menu-bar app over native messaging.
 
-```
-YT Music tab ──content.js (scrape title/artist + <video>.currentTime)
-                  │ runtime messaging
-                  ▼
-             background.js (LRCLIB fetch + LRC parse + line/word pick)
-                  │ native messaging (stdin frames — no port/TLS/CSP)
-                  ▼
-             menubar app (Swift, NSStatusItem) ── bolds the active word
-```
+## Install
 
-Self-contained — does **not** depend on the Better Lyrics extension (its lyric DOM
-lives in a private, versioned package that would break on every release). Better
-Lyrics can keep running on-page alongside this.
-
-## Install (one command)
+### Homebrew
 
 ```bash
-~/Downloads/verse/install.sh
+brew install --cask navneetbind/tap/verse
 ```
 
-It builds the app, gives the extension a stable Chrome ID, and installs the
-native-messaging host manifest for every browser you have. Then load the
-extension:
+### DMG
 
-- **Chrome / Brave / Edge** (persists across restarts):
-  `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
-  select `extension/`.
-- **Firefox** (temporary — reload after each restart):
-  `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** →
-  select `extension/manifest.json`.
+Download `Verse-<version>.dmg` from
+[Releases](https://github.com/navneetbind/verse/releases), drag **Verse** into
+**Applications**, then open it once. It connects itself to your browsers and
+shows the last step.
 
-Play a song on <https://music.youtube.com>. The browser auto-launches the
-menu-bar app; lyrics appear in the bar. **Re-run `install.sh` after any change to
-the Swift app** (rebuilds + refreshes the host path).
+Verse is not notarized, so the first open needs **System Settings → Privacy &
+Security → Open Anyway**.
 
-> Firefox permanent install needs AMO signing (a Mozilla account). Chrome
-> load-unpacked is persistent with no signing, so it's the recommended daily home.
+### Then add the extension
+
+The extension is copied to `~/Library/Application Support/Verse/extension`.
+
+- **Chrome, Brave, Edge, Vivaldi, Arc**: open the extensions page, turn on
+  **Developer mode**, click **Load unpacked**, choose that folder. It stays
+  installed across restarts.
+- **Firefox**: `about:debugging#/runtime/this-firefox` → **Load Temporary
+  Add-on…** → choose `manifest.json` in that folder. Firefox drops it on restart
+  (a permanent install needs Mozilla signing).
+
+Play a song on <https://music.youtube.com>. The browser starts Verse by itself;
+lyrics appear in the menu bar.
 
 ## Features
-- **Line + word-level sync.** LRCLIB provides line timing; words are interpolated
-  across each line's duration and the active word is **bolded**. (No free lyrics
-  source has true per-word timestamps — this is an approximation, not official
-  richsync.)
-- **Long lines** window around the active word (with `…`) so the sung word stays
-  visible instead of being truncated.
-- **Pause** shows a `⏸` prefix.
-- **Dropdown menu** shows the current `Title — Artist`, plus Quit.
+
+- **Word-by-word highlight** when the lyrics have real word timing; plain lines
+  otherwise.
+- **Fixed width** you choose (gear → Lyric width). Short lines sit centred; long
+  lines glide so the word being sung stays in view.
+- **Now Playing card** on click: artwork, seek bar, previous / play-pause / next.
+- Colours, text size, and lyrics source (Better Lyrics or LRCLIB) in the gear
+  menu.
+- Appears only while a YouTube Music tab is open.
+
+## Lyrics sources
+
+1. **[Better Lyrics](https://github.com/better-lyrics/better-lyrics)**, if you
+   have it installed: Verse reads its lyrics from the page, including real
+   per-word timing. Verse opens the Lyrics tab for a moment on each new song so
+   Better Lyrics loads, then puts you back where you were.
+2. **[LRCLIB](https://lrclib.net)** otherwise: line-level lyrics, no word
+   highlight.
 
 ## How it works
-- **content.js** (isolated world): polls `ytmusic-player-bar .title` / `.byline`
-  for the track and listens to the `<video>` `timeupdate` for position. No network
-  (page CSP would block it). Forwards to the background service worker.
-- **background.js** (MV3 service worker, Chrome + Firefox 121+): fetches
-  `syncedLyrics` from LRCLIB (`/api/get` exact, `/api/search` fallback), parses
-  `[mm:ss.xx]`, and sends `{type:"line", text, active}` on each line/word change
-  over the native-messaging port.
-- **menubar app**: `NativeHost.swift` reads Firefox/Chrome native-messaging frames
-  (4-byte LE length + JSON) from stdin; `main.swift` renders the line as an
-  attributed `NSStatusItem` title, bolding the active word.
 
-## Why native messaging (not WebSocket)
-Firefox force-upgrades `ws://127.0.0.1` → `wss://` on extension pages
-(CSP `upgrade-insecure-requests`); Chrome blocks `ws://` as mixed content. A
-plain-`ws` local server is a dead end. Native messaging has no port, no TLS, no
-CSP, no HTTPS upgrade — and the browser auto-launches the app (it exits when the
-browser disconnects).
+```
+YouTube Music tab
+  pageclock.js   (page world)  song position + transport via the player API
+  content.js     (extension)   song, Better Lyrics parsing, current line/word
+        │ runtime messaging
+  background.js                LRCLIB fallback, relays to the app
+        │ native messaging (stdin/stdout frames)
+  Verse.app                    menu-bar item, Now Playing card
+```
+
+The song position comes from YouTube Music's player API rather than the
+`<video>` element, whose time runs on across tracks on some layouts.
+
+Native messaging rather than a local WebSocket: Firefox upgrades `ws://127.0.0.1`
+to `wss://` on extension pages and Chrome blocks it as mixed content. Native
+messaging needs no port or TLS, and the browser launches the app itself.
+
+## Build from source
+
+Needs the Xcode command line tools.
+
+```bash
+./build.sh            # build/Verse.app (universal)
+./build.sh install    # copy to ~/Applications and connect to your browsers
+./build.sh dmg        # build/Verse-<version>.dmg
+```
+
+`install.sh` is the older developer setup: it runs the app straight from
+`menubar/.build` and generates the Chrome extension key.
 
 ## Files
+
 ```
 verse/
-├─ install.sh          build + install host manifests + Chrome key/id
-├─ extension/          MV3 (Chrome + Firefox)
-│  ├─ manifest.json    (install.sh injects a "key" for a stable Chrome id)
+├─ build.sh              app bundle, install, DMG
+├─ install.sh            developer setup (runs from .build)
+├─ extension/            MV3, Chrome + Firefox
+│  ├─ manifest.json
 │  ├─ content.js
+│  ├─ pageclock.js
 │  └─ background.js
-├─ menubar/            Swift SPM app
-│  └─ Sources/verse/{main.swift, NativeHost.swift}
-└─ .chrome-key.pem     generated private key (keep; do not commit)
+└─ menubar/              Swift package
+   ├─ Resources/         Info.plist, icon
+   ├─ scripts/make_icon.swift
+   └─ Sources/verse/     main, LyricView, NowPlayingView, NativeHost, Setup
 ```
-
-## Limits
-- Word timing is interpolated, not true per-word.
-- Menu bar windows long lines (~55 chars visible).
-- Some tracks have no synced lyrics (falls back to the song title).

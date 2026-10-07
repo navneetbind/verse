@@ -500,7 +500,33 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 }
 
+// Settings written before Verse shipped as an app bundle live under the bare
+// executable name; carry them over once so nothing resets on upgrade.
+if let bundleID = Bundle.main.bundleIdentifier, bundleID != "verse",
+   let old = UserDefaults(suiteName: "verse")?.persistentDomain(forName: "verse"),
+   UserDefaults.standard.object(forKey: "migratedFromBareDomain") == nil {
+    for (k, v) in old where UserDefaults.standard.object(forKey: k) == nil {
+        UserDefaults.standard.set(v, forKey: k)
+    }
+    UserDefaults.standard.set(true, forKey: "migratedFromBareDomain")
+}
+
 let app = NSApplication.shared
+if Setup.isUserLaunch {
+    // opened by hand (or `verse --register`): set up, don't run as a lyrics host
+    if CommandLine.arguments.contains("--register") {
+        if Setup.isRunningFromTemporaryLocation {
+            print("Verse is running from a disk image or temporary copy; move it to Applications first.")
+            exit(1)
+        }
+        let done = Setup.register()
+        _ = Setup.installExtensionFolder()
+        print("Registered with: \(done.isEmpty ? "no browsers found" : done.joined(separator: ", "))")
+    } else {
+        Setup.runInteractive()
+    }
+    exit(0)
+}
 app.setActivationPolicy(.accessory) // no Dock icon, menu-bar only
 let controller = AppController()
 app.delegate = controller
