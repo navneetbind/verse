@@ -18,6 +18,8 @@ let curWord = -1;
 let trackKey = null;
 let fetchToken = 0;
 let blMode = false; // Better Lyrics is driving (content.js sends "bl")
+let estimateWords = true; // app setting: guess per-word timing inside LRCLIB lines
+let songDur = 0;
 
 // ---- native-messaging port to menu-bar app ----
 // connectNative launches the Swift app and pipes JSON to it over stdin.
@@ -35,6 +37,11 @@ function connectNative() {
     });
     // app -> browser: playback control commands, relayed to the YT Music tab
     port.onMessage.addListener((msg) => {
+      if (msg && msg.cmd === "estimate") {
+        estimateWords = !!msg.value;
+        curIdx = -1;
+        curWord = -1;
+      }
       if (msg && msg.cmd) relayToPage(msg);
     });
   } catch (e) {
@@ -172,6 +179,7 @@ async function onTrack(title, artist, duration, art, spotify) {
   lines = [];
   curIdx = -1;
   curWord = -1;
+  songDur = duration || 0;
 
   // placeholder shown until real lyrics arrive (both BL and LRCLIB modes)
   const titleArtist = title + (artist ? " — " + artist : "");
@@ -189,8 +197,30 @@ async function onTrack(title, artist, duration, art, spotify) {
   }
 }
 
-// LRCLIB is line-level only (no real per-word timing) — show the whole line in
-// one color (active: -1), never a fake/interpolated word highlight.
+// LRCLIB is line-level only. With estimateWords on, the line's span (until the
+// next line starts) is split across its words by letter count, so a word
+// highlight can run without real per-word timing.
+function lineWords(text) {
+  const words = text.split(" ");
+  const weights = words.map((w) => w.replace(/[^\p{L}\p{N}]/gu, "").length + 1);
+  return { words, weights, total: weights.reduce((a, b) => a + b, 0) };
+}
+
+function estimateWord(idx, t) {
+  const line = lines[idx];
+  if (!line.text) return -1;
+  const next = idx + 1 < lines.length ? lines[idx + 1].t : (songDur || line.t + 5);
+  const { words, weights, total } = line.w || (line.w = lineWords(line.text));
+  const span = Math.min((next - line.t) * 0.9, words.length * 0.8);
+  if (span <= 0) return words.length - 1;
+  let at = ((t - line.t) / span) * total;
+  for (let i = 0; i < words.length; i++) {
+    at -= weights[i];
+    if (at < 0) return i;
+  }
+  return words.length - 1;
+}
+
 function onTime(rawT) {
   if (!lines.length) return;
   const t = rawT + OFFSET_SEC;
@@ -199,16 +229,19 @@ function onTime(rawT) {
     if (lines[i].t <= t) idx = i;
     else break;
   }
-  if (idx === curIdx) return;
+  const word = estimateWords && idx >= 0 ? estimateWord(idx, t) : -1;
+  if (idx === curIdx && word === curWord) return;
   curIdx = idx;
+  curWord = word;
   const text = idx < 0 ? "♪" : lines[idx].text;
-  send({ type: "line", text, active: -1, src: "lrc" });
+  send({ type: "line", text, active: word, src: word >= 0 ? "lrc-est" : "lrc" });
 }
 
 api.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || !msg.type) return;
   switch (msg.type) {
     case "mode":
+      if (blMode && !msg.bl) trackKey = null;
       blMode = !!msg.bl;
       break;
     case "diag": // one-shot DOM report, relayed into the app's debug log
@@ -218,6 +251,7 @@ api.runtime.onMessage.addListener((msg, sender) => {
       send({ type: "line", text: msg.text || "♪", active: msg.active ?? -1, src: msg.timed ? "bl-word" : "bl-line" });
       break;
     case "track":
+      if (sender && sender.tab) relayToPage({ cmd: "estimate", value: estimateWords });
       onTrack(msg.title || "", msg.artist || "", msg.duration || 0, msg.art || "",
         !!(sender && sender.tab && (sender.tab.url || "").indexOf("https://open.spotify.com") === 0));
       break;

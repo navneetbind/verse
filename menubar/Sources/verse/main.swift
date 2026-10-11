@@ -95,6 +95,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var widthIndex = 1
     private var lyricWidth: CGFloat { widths[min(widthIndex, widths.count - 1)].1 }
     private var widthItems: [NSMenuItem] = []
+    private var estimateWords = true // guess word timing on LRCLIB lines
+    private var estimateItem: NSMenuItem!
     private var slideLines = false // new line rises in from below instead of swapping
     private var transitionItems: [NSMenuItem] = []
 
@@ -105,6 +107,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if defaults.object(forKey: "sourceIndex") != nil { sourceIndex = defaults.integer(forKey: "sourceIndex") }
         if defaults.object(forKey: "widthIndex") != nil { widthIndex = defaults.integer(forKey: "widthIndex") }
         slideLines = defaults.bool(forKey: "slideLines")
+        estimateWords = defaults.object(forKey: "estimateWords") == nil || defaults.bool(forKey: "estimateWords")
         if defaults.object(forKey: "rightAnchor") != nil { rightAnchor = CGFloat(defaults.double(forKey: "rightAnchor")) }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -155,6 +158,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             lyricsMenu.addItem(item)
             lyricsItems.append(item)
         }
+        lyricsMenu.addItem(.separator())
+        estimateItem = NSMenuItem(title: "Estimate words without Better Lyrics",
+                                  action: #selector(toggleEstimate), keyEquivalent: "")
+        estimateItem.target = self
+        estimateItem.state = estimateWords ? .on : .off
+        lyricsMenu.addItem(estimateItem)
         lyricsParent.submenu = lyricsMenu
         menu.addItem(lyricsParent)
 
@@ -236,6 +245,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         host.onEOF = { NSApp.terminate(nil) } // browser closed → exit
         host.start()
         host.send(["cmd": "source", "value": sourceIndex]) // tell extension the saved source
+        host.send(["cmd": "estimate", "value": estimateWords])
     }
 
     private func handle(_ str: String) {
@@ -515,6 +525,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         for item in sourceItems { item.state = item.tag == sourceIndex ? .on : .off }
         defaults.set(sourceIndex, forKey: "sourceIndex")
         host.send(["cmd": "source", "value": sourceIndex])
+    }
+
+    @objc private func toggleEstimate() {
+        estimateWords.toggle()
+        estimateItem.state = estimateWords ? .on : .off
+        defaults.set(estimateWords, forKey: "estimateWords")
+        host.send(["cmd": "estimate", "value": estimateWords])
     }
 
     @objc private func pickTransition(_ sender: NSMenuItem) {

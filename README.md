@@ -55,8 +55,12 @@ lyrics appear in the menu bar.
    have it installed: Verse reads its lyrics from the page, including real
    per-word timing. Verse opens the Lyrics tab for a moment on each new song so
    Better Lyrics loads, then puts you back where you were.
-2. **[LRCLIB](https://lrclib.net)** otherwise: line-level lyrics, no word
-   highlight.
+2. **[LRCLIB](https://lrclib.net)** otherwise: line-synced lyrics.
+
+When a source has only line timing (LRCLIB, or Better Lyrics without word
+sync), Verse estimates the word highlight by spreading each line's time across
+its words by length. Turn it off in gear → Lyrics → "Estimate words without
+Better Lyrics".
 
 ## How it works
 

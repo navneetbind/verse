@@ -19,6 +19,7 @@ let blModel = null; // [{ t, dur, text, words:[{t,dur,text}] }]
 let blActive = false;
 let blLastKey = "";
 let forcedLRC = false; // user chose LRCLIB source (ignore Better Lyrics)
+let estimateWords = true; // app setting: guess word timing on line-only lyrics
 
 // Better Lyrics only loads lyrics while its tab is open. For each new song Verse
 // opens that tab, keeps the timing it reads, and puts you back on your tab.
@@ -203,6 +204,11 @@ function blRender(cur) {
     return;
   }
   const line = blModel[li];
+  if (!line.timed && estimateWords) {
+    const next = li + 1 < blModel.length ? blModel[li + 1].t : line.t + 5;
+    emitBL(line.text, estimateWord(line.text, cur - line.t, line.dur > 0 ? line.dur : (next - line.t) * 0.9), false);
+    return;
+  }
   let wi = -1;
   if (line.timed) {
     for (let i = 0; i < line.words.length; i++) {
@@ -214,6 +220,21 @@ function blRender(cur) {
   // doesn't leave the last word lit during the gap before the next line
   if (line.dur > 0 && cur > line.t + line.dur) wi = -1;
   emitBL(line.text, wi < 0 ? -1 : line.words[wi].tok, line.timed);
+}
+// BL lines without word timing: split the line's span across its words by
+// letter count (same estimate background.js uses for LRCLIB).
+function estimateWord(text, into, span) {
+  const words = text.split(" ");
+  const weights = words.map((w) => w.replace(/[^\p{L}\p{N}]/gu, "").length + 1);
+  const total = weights.reduce((a, b) => a + b, 0);
+  span = Math.min(span, words.length * 0.8);
+  if (span <= 0) return words.length - 1;
+  let at = (into / span) * total;
+  for (let i = 0; i < words.length; i++) {
+    at -= weights[i];
+    if (at < 0) return i;
+  }
+  return words.length - 1;
 }
 function emitBL(text, active, timed) {
   const key = text + "|" + active;
@@ -481,6 +502,10 @@ api.runtime.onMessage.addListener((msg) => {
       break;
     case "seek":
       if (video && typeof msg.t === "number") video.currentTime = msg.t;
+      break;
+    case "estimate":
+      estimateWords = !!msg.value;
+      blLastKey = "";
       break;
     case "source": {
       forcedLRC = msg.value === 1;
