@@ -425,6 +425,9 @@ function playback() {
   }
   // give the player clock a moment to start before trusting <video> at all
   if (!clock && performance.now() < 2000) return null;
+  // only YouTube Music's <video> is the track; elsewhere (Spotify) page videos
+  // are looping visuals, so there the clock is the only source
+  if (location.hostname !== "music.youtube.com") return null;
   const video = document.querySelector("video");
   if (!video) return null;
   return { t: video.currentTime, dur: isFinite(video.duration) ? video.duration : 0, paused: video.paused };

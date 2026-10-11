@@ -127,7 +127,7 @@ enum Setup {
 
         • Firefox: open about:debugging → This Firefox → "Load Temporary Add-on…" and choose manifest.json in the extension folder. (Firefox drops it on restart.)
 
-        Then play a song on music.youtube.com — Verse appears in the menu bar by itself.
+        Then play a song on music.youtube.com or open.spotify.com — Verse appears in the menu bar by itself.
         """
         if ext != nil { alert.addButton(withTitle: "Show Extension Folder") }
         alert.addButton(withTitle: "Done")

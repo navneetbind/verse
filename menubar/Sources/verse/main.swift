@@ -31,7 +31,7 @@ struct Theme {
     let active: NSColor
 }
 
-final class AppController: NSObject, NSApplicationDelegate {
+final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var host: NativeHost!
 
@@ -73,6 +73,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var lyricView: LyricView!
     private var nowPlaying: NowPlayingView!
     private var popover: NSPopover!
+    private var outsideClickMonitor: Any?
     private var settingsMenu: NSMenu!
     private var lyricsItems: [NSMenuItem] = []
     private var colorItems: [NSMenuItem] = []
@@ -94,6 +95,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var widthIndex = 1
     private var lyricWidth: CGFloat { widths[min(widthIndex, widths.count - 1)].1 }
     private var widthItems: [NSMenuItem] = []
+    private var slideLines = false // new line rises in from below instead of swapping
+    private var transitionItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if defaults.object(forKey: "wordMode") != nil { wordMode = defaults.bool(forKey: "wordMode") }
@@ -101,6 +104,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         if defaults.object(forKey: "fontSizeIndex") != nil { fontSizeIndex = defaults.integer(forKey: "fontSizeIndex") }
         if defaults.object(forKey: "sourceIndex") != nil { sourceIndex = defaults.integer(forKey: "sourceIndex") }
         if defaults.object(forKey: "widthIndex") != nil { widthIndex = defaults.integer(forKey: "widthIndex") }
+        slideLines = defaults.bool(forKey: "slideLines")
         if defaults.object(forKey: "rightAnchor") != nil { rightAnchor = CGFloat(defaults.double(forKey: "rightAnchor")) }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -110,6 +114,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             let v = LyricView(frame: b.bounds)
             v.autoresizingMask = [.width, .height]
             b.addSubview(v)
+            v.slideLines = slideLines
             lyricView = v
         }
 
@@ -135,6 +140,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         popover.contentViewController = vc
         popover.contentSize = nowPlaying.frame.size
         popover.behavior = .transient
+        popover.delegate = self
 
         // settings menu (shown from the card's gear button)
         let menu = NSMenu()
@@ -204,6 +210,19 @@ final class AppController: NSObject, NSApplicationDelegate {
         widthParent.submenu = widthMenu
         menu.addItem(widthParent)
 
+        let transitionParent = NSMenuItem(title: "Line change", action: nil, keyEquivalent: "")
+        let transitionMenu = NSMenu()
+        for (i, name) in ["Instant", "Slide up"].enumerated() {
+            let item = NSMenuItem(title: name, action: #selector(pickTransition(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = i
+            item.state = (i == 1) == slideLines ? .on : .off
+            transitionMenu.addItem(item)
+            transitionItems.append(item)
+        }
+        transitionParent.submenu = transitionMenu
+        menu.addItem(transitionParent)
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
@@ -236,7 +255,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         switch p.type {
         case "line":
-            let newText = (p.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            var newText = (p.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            // an empty lyric mid-song is a vocal gap (LRCLIB writes those as blank
+            // lines), not "nothing playing" — show ♪ and keep the fixed width
+            if newText.isEmpty && !songTitle.isEmpty { newText = "♪" }
             if newText != lineText { lyricView?.offset = 0 }
             lineText = newText
             if lineText.isEmpty { lineText = idle }
@@ -466,6 +488,20 @@ final class AppController: NSObject, NSApplicationDelegate {
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
             popover.contentViewController?.view.window?.makeKey()
+            // A menu-bar app is never the active app, so .transient alone misses
+            // clicks in other apps; watch for them while the card is open.
+            outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            ) { [weak self] _ in
+                self?.popover.performClose(nil)
+            }
+        }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        if let m = outsideClickMonitor {
+            NSEvent.removeMonitor(m)
+            outsideClickMonitor = nil
         }
     }
 
@@ -479,6 +515,13 @@ final class AppController: NSObject, NSApplicationDelegate {
         for item in sourceItems { item.state = item.tag == sourceIndex ? .on : .off }
         defaults.set(sourceIndex, forKey: "sourceIndex")
         host.send(["cmd": "source", "value": sourceIndex])
+    }
+
+    @objc private func pickTransition(_ sender: NSMenuItem) {
+        slideLines = sender.tag == 1
+        for item in transitionItems { item.state = (item.tag == 1) == slideLines ? .on : .off }
+        defaults.set(slideLines, forKey: "slideLines")
+        lyricView.slideLines = slideLines
     }
 
     @objc private func pickWidth(_ sender: NSMenuItem) {
