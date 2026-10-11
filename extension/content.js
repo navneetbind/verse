@@ -188,6 +188,8 @@ function parseBL() {
     })
     .filter((l) => l.text);
   model.sort((a, b) => a.t - b.t);
+  // unsynced lyrics come through with no (or one shared) line time — not usable
+  if (new Set(model.map((l) => l.t)).size < Math.max(2, model.length / 2)) return null;
   return model.length ? model : null;
 }
 

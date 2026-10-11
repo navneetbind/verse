@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Verse",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Shows YouTube Music and Spotify Web synced lyrics in the Verse macOS menu-bar app.",
   "browser_specific_settings": {
     "gecko": {
